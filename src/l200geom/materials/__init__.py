@@ -2,37 +2,19 @@
 
 from __future__ import annotations
 
-from functools import wraps
-from typing import Callable
-
 import legendoptics.fibers
 import legendoptics.lar
 import legendoptics.nylon
 import legendoptics.pen
-import legendoptics.pmts
 import legendoptics.tpb
-import legendoptics.vm2000
-import legendoptics.water
-import numpy as np
 import pint
 import pyg4ometry.geant4 as g4
 
-
-def cached_property(material: Callable):
-    @wraps(material)
-    def wrapper(self):
-        attr = f"_{material.__name__}"
-        if not hasattr(self, attr):
-            setattr(self, attr, material(self))
-        return getattr(self, attr)
-
-    return property(wrapper)
+from .surfaces import OpticalSurfaceRegistry
 
 
 class OpticalMaterialRegistry:
     def __init__(self, g4_registry: g4.Registry):
-        from .surfaces import OpticalSurfaceRegistry
-
         self.g4_registry = g4_registry
         self.lar_temperature = 88.8
 
@@ -47,40 +29,44 @@ class OpticalMaterialRegistry:
             self._elements[symbol] = (self._elements_cb[symbol])()
         return self._elements[symbol]
 
-    def _add_element(self, name: str, symbol: str, z: int, a: float) -> None:
+    def _add_element(self, name: str, symbol: str, Z: int, A: float) -> None:
         """Lazily define an element on the current registry."""
         assert symbol not in self._elements_cb
         self._elements_cb[symbol] = lambda: g4.ElementSimple(
-            name=name, symbol=symbol, Z=z, A=a, registry=self.g4_registry
+            name=name, symbol=symbol, Z=Z, A=A, registry=self.g4_registry
         )
 
     def _define_elements(self) -> None:
         """Lazily define all used elements."""
-        self._add_element(name="Hydrogen", symbol="H", z=1, a=1.00794)
-        self._add_element(name="Boron", symbol="B", z=5, a=10.811)
-        self._add_element(name="Carbon", symbol="C", z=6, a=12.011)
-        self._add_element(name="Nitrogen", symbol="N", z=7, a=14.01)
-        self._add_element(name="Oxygen", symbol="O", z=8, a=16.00)
-        self._add_element(name="Fluorine", symbol="F", z=9, a=19.00)
-        self._add_element(name="Sodium", symbol="Na", z=11, a=22.99)
-        self._add_element(name="Aluminium", symbol="Al", z=13, a=26.981539)
-        self._add_element(name="Silicon", symbol="Si", z=14, a=28.09)
-        self._add_element(name="argon", symbol="Ar", z=18, a=39.95)
-        self._add_element(name="Chromium", symbol="Cr", z=24, a=51.9961)
-        self._add_element(name="Manganese", symbol="Mn", z=25, a=54.93805)
-        self._add_element(name="Iron", symbol="Fe", z=26, a=55.845)
-        self._add_element(name="Indium", symbol="In", z=49, a=114.82)
-        self._add_element(name="Cobalt", symbol="Co", z=27, a=58.9332)
-        self._add_element(name="Nickel", symbol="Ni", z=28, a=58.6934)
-        self._add_element(name="Copper", symbol="Cu", z=29, a=63.55)
-        self._add_element(name="Tantalum", symbol="Ta", z=73, a=180.94)
-        self._add_element(name="Gold", symbol="Au", z=79, a=196.967)
+        self._add_element(name="Hydrogen", symbol="H", Z=1, A=1.00794)
+        self._add_element(name="Carbon", symbol="C", Z=6, A=12.011)
+        self._add_element(name="Nitrogen", symbol="N", Z=7, A=14.01)
+        self._add_element(name="Oxygen", symbol="O", Z=8, A=16.00)
+        self._add_element(name="Fluorine", symbol="F", Z=9, A=19.00)
+        self._add_element(name="Silicon", symbol="Si", Z=14, A=28.09)
+        self._add_element(name="argon", symbol="Ar", Z=18, A=39.95)
+        self._add_element(name="Chromium", symbol="Cr", Z=24, A=51.9961)
+        self._add_element(name="Manganese", symbol="Mn", Z=25, A=54.93805)
+        self._add_element(name="Iron", symbol="Fe", Z=26, A=55.845)
+        self._add_element(name="Indium", symbol="In", Z=49, A=114.82)
+        self._add_element(name="Cobalt", symbol="Co", Z=27, A=58.9332)
+        self._add_element(name="Nickel", symbol="Ni", Z=28, A=58.6934)
+        self._add_element(name="Copper", symbol="Cu", Z=29, A=63.55)
+        self._add_element(name="Gadolinium", symbol="Gd", Z=64.7, A=157.25)
+        # self._add_element(name="Water", symbol="H2O", geant4.MaterialPredefined("G4_WATER"))
 
-    @cached_property
+        
+
+    
+
+    @property
     def liquidargon(self) -> g4.Material:
         """LEGEND liquid argon."""
-        _liquidargon = g4.Material(
-            name="liquid_argon",
+        if hasattr(self, "_liquidargon"):
+            return self._liquidargon
+
+        self._liquidargon = g4.Material(
+            name="LiquidArgon",
             density=1.390,  # g/cm3
             number_of_components=1,
             state="liquid",
@@ -88,165 +74,158 @@ class OpticalMaterialRegistry:
             pressure=1.0 * 1e5,  # pascal
             registry=self.g4_registry,
         )
-        _liquidargon.add_element_natoms(self.get_element("Ar"), natoms=1)
+        self._liquidargon.add_element_natoms(self.get_element("Ar"), natoms=1)
 
         u = pint.get_application_registry().get()
         legendoptics.lar.pyg4_lar_attach_rindex(
-            _liquidargon,
+            self._liquidargon,
             self.g4_registry,
         )
         legendoptics.lar.pyg4_lar_attach_attenuation(
-            _liquidargon,
+            self._liquidargon,
             self.g4_registry,
             self.lar_temperature * u.K,
         )
         legendoptics.lar.pyg4_lar_attach_scintillation(
-            _liquidargon,
+            self._liquidargon,
             self.g4_registry,
             triplet_lifetime_method="legend200-llama",
         )
+        # added myself
+        self._liquidargon.addConstProperty("SCINTILLATIONYIELD", 20000)
 
-        return _liquidargon
+        if not hasattr(self._liquidargon, "SCINTILLATIONYIELD"):
+            print("SCINTILLATIONYIELD is NOT defined")
+        #until here
 
-    @cached_property
+        return self._liquidargon
+
+    @property
     def metal_steel(self) -> g4.Material:
         """Stainless steel of the GERDA cryostat."""
-        _metal_steel = g4.Material(
+        if hasattr(self, "_metal_steel"):
+            return self._metal_steel
+
+        self._metal_steel = g4.Material(
             name="metal_steel",
             density=7.9,
             number_of_components=5,
             registry=self.g4_registry,
         )
-        _metal_steel.add_element_massfraction(self.get_element("Si"), massfraction=0.01)
-        _metal_steel.add_element_massfraction(self.get_element("Cr"), massfraction=0.20)
-        _metal_steel.add_element_massfraction(self.get_element("Mn"), massfraction=0.02)
-        _metal_steel.add_element_massfraction(self.get_element("Fe"), massfraction=0.67)
-        _metal_steel.add_element_massfraction(self.get_element("Ni"), massfraction=0.10)
+        self._metal_steel.add_element_massfraction(self.get_element("Si"), massfraction=0.01)
+        self._metal_steel.add_element_massfraction(self.get_element("Cr"), massfraction=0.20)
+        self._metal_steel.add_element_massfraction(self.get_element("Mn"), massfraction=0.02)
+        self._metal_steel.add_element_massfraction(self.get_element("Fe"), massfraction=0.67)
+        self._metal_steel.add_element_massfraction(self.get_element("Ni"), massfraction=0.10)
 
-        return _metal_steel
+        return self._metal_steel
 
-    @cached_property
+    @property
     def metal_silicon(self) -> g4.Material:
         """Silicon."""
-        _metal_silicon = g4.Material(
+        if hasattr(self, "_metal_silicon"):
+            return self._metal_silicon
+
+        self._metal_silicon = g4.Material(
             name="metal_silicon",
             density=2.330,
-            number_of_components=1,
+            number_of_components=5,
             registry=self.g4_registry,
         )
-        _metal_silicon.add_element_natoms(self.get_element("Si"), natoms=1)
+        self._metal_silicon.add_element_natoms(self.get_element("Si"), natoms=1)
 
-        return _metal_silicon
+        return self._metal_silicon
 
-    @cached_property
-    def metal_tantalum(self) -> g4.Material:
-        """Tantalum."""
-        _metal_tantalum = g4.Material(
-            name="metal_tantalum",
-            density=16.69,
-            number_of_components=1,
-            registry=self.g4_registry,
-        )
-        _metal_tantalum.add_element_natoms(self.get_element("Ta"), natoms=1)
-
-        return _metal_tantalum
-
-    @cached_property
+    @property
     def metal_copper(self) -> g4.Material:
         """Copper structures.
 
         .. warning:: For full optics support, a reflective surface is needed, see
             :py:func:`surfaces.OpticalSurfaceRegistry.to_copper`.
         """
-        _metal_copper = g4.Material(
+        if hasattr(self, "_metal_copper"):
+            return self._metal_copper
+
+        self._metal_copper = g4.Material(
             name="metal_copper",
             density=8.960,
             number_of_components=1,
             registry=self.g4_registry,
         )
-        _metal_copper.add_element_natoms(self.get_element("Cu"), natoms=1)
+        self._metal_copper.add_element_natoms(self.get_element("Cu"), natoms=1)
 
-        return _metal_copper
+        return self._metal_copper
 
-    @cached_property
-    def metal_caps_gold(self) -> g4.Material:
-        """Gold for calibration source.
-
-        .. note:: modified density in order to have the equivalent of two 2x2cm gold
-            foils, with 20 um thickness.
-        """
-        # quoting https://doi.org/10.1088/1748-0221/18/02/P02001:
-        # After the deposition, the external part of the foil with no 228Th
-        # activity was cut off, and the foil rolled
-
-        volume_of_foil = np.pi * (1 / 8 * 2.54) ** 2 * 50e-4  # 1/4” diameter, 50 um thickness
-        volume_of_inner = np.pi * 0.2**2 * 0.4  # 2 cm radius, 4 cm height
-        _metal_caps_gold = g4.Material(
-            name="metal_caps_gold",
-            density=19.3 * volume_of_foil / volume_of_inner,
-            number_of_components=1,
-            registry=self.g4_registry,
-        )
-        _metal_caps_gold.add_element_natoms(self.get_element("Au"), natoms=1)
-
-        return _metal_caps_gold
-
-    @cached_property
-    def peek(self) -> g4.Material:
-        """PEEK for the SIS absorber holder."""
-        _peek = g4.Material(name="peek", density=1.320, number_of_components=3, registry=self.g4_registry)
-        _peek.add_element_natoms(self.get_element("C"), natoms=19)
-        _peek.add_element_natoms(self.get_element("H"), natoms=12)  # TODO: MaGe uses C19H1203??
-        _peek.add_element_natoms(self.get_element("O"), natoms=3)
-
-        return _peek
-
-    @cached_property
+    @property
     def pmma(self) -> g4.Material:
         """PMMA for the inner fiber cladding layer."""
-        _pmma = g4.Material(name="pmma", density=1.2, number_of_components=3, registry=self.g4_registry)
-        _pmma.add_element_natoms(self.get_element("H"), natoms=8)
-        _pmma.add_element_natoms(self.get_element("C"), natoms=5)
-        _pmma.add_element_natoms(self.get_element("O"), natoms=2)
+        if hasattr(self, "_pmma"):
+            return self._pmma
 
-        legendoptics.fibers.pyg4_fiber_cladding1_attach_rindex(_pmma, self.g4_registry)
+        self._pmma = g4.Material(name="pmma", density=1.2, number_of_components=3, registry=self.g4_registry)
+        self._pmma.add_element_natoms(self.get_element("H"), natoms=8)
+        self._pmma.add_element_natoms(self.get_element("C"), natoms=5)
+        self._pmma.add_element_natoms(self.get_element("O"), natoms=2)
 
-        return _pmma
+        legendoptics.fibers.pyg4_fiber_cladding1_attach_rindex(
+            self._pmma,
+            self.g4_registry,
+        )
 
-    @cached_property
+        return self._pmma
+
+    @property
     def pmma_out(self) -> g4.Material:
         """PMMA for the outer fiber cladding layer."""
-        _pmma_out = g4.Material(
+        if hasattr(self, "_pmma_out"):
+            return self._pmma_out
+
+        self._pmma_out = g4.Material(
             name="pmma_cl2",
             density=1.2,
             number_of_components=3,
             registry=self.g4_registry,
         )
-        _pmma_out.add_element_natoms(self.get_element("H"), natoms=8)
-        _pmma_out.add_element_natoms(self.get_element("C"), natoms=5)
-        _pmma_out.add_element_natoms(self.get_element("O"), natoms=2)
+        self._pmma_out.add_element_natoms(self.get_element("H"), natoms=8)
+        self._pmma_out.add_element_natoms(self.get_element("C"), natoms=5)
+        self._pmma_out.add_element_natoms(self.get_element("O"), natoms=2)
 
-        legendoptics.fibers.pyg4_fiber_cladding2_attach_rindex(_pmma_out, self.g4_registry)
+        legendoptics.fibers.pyg4_fiber_cladding2_attach_rindex(
+            self._pmma_out,
+            self.g4_registry,
+        )
 
-        return _pmma_out
+        return self._pmma_out
 
-    @cached_property
+    @property
     def ps_fibers(self) -> g4.Material:
         """Polystyrene for the fiber core."""
-        _ps_fibers = g4.Material(
+        if hasattr(self, "_ps_fibers"):
+            return self._ps_fibers
+
+        self._ps_fibers = g4.Material(
             name="ps_fibers",
             density=1.05,
             number_of_components=2,
             registry=self.g4_registry,
         )
-        _ps_fibers.add_element_natoms(self.get_element("H"), natoms=8)
-        _ps_fibers.add_element_natoms(self.get_element("C"), natoms=8)
+        self._ps_fibers.add_element_natoms(self.get_element("H"), natoms=8)
+        self._ps_fibers.add_element_natoms(self.get_element("C"), natoms=8)
 
-        legendoptics.fibers.pyg4_fiber_core_attach_rindex(_ps_fibers, self.g4_registry)
-        legendoptics.fibers.pyg4_fiber_core_attach_absorption(_ps_fibers, self.g4_registry)
-        legendoptics.fibers.pyg4_fiber_core_attach_wls(_ps_fibers, self.g4_registry)
+        legendoptics.fibers.pyg4_fiber_core_attach_rindex(
+            self._ps_fibers,
+            self.g4_registry,
+        )
+        legendoptics.fibers.pyg4_fiber_core_attach_absorption(
+            self._ps_fibers,
+            self.g4_registry,
+        )
+        legendoptics.fibers.pyg4_fiber_core_attach_wls(
+            self._ps_fibers,
+            self.g4_registry,
+        )
 
-        return _ps_fibers
+        return self._ps_fibers
 
     def _tpb(self, name: str, **wls_opts) -> g4.Material:
         t = g4.Material(
@@ -264,21 +243,34 @@ class OpticalMaterialRegistry:
 
         return t
 
-    @cached_property
+    @property
     def tpb_on_fibers(self) -> g4.Material:
         """Tetraphenyl-butadiene wavelength shifter (evaporated on fibers)."""
-        return self._tpb("tpb_on_fibers")
+        if hasattr(self, "_tpb_on_fibers"):
+            return self._tpb_on_fibers
 
-    @cached_property
+        self._tpb_on_fibers = self._tpb("tpb_on_fibers")
+
+        return self._tpb_on_fibers
+
+    @property
     def tpb_on_tetratex(self) -> g4.Material:
         """Tetraphenyl-butadiene wavelength shifter (evaporated on Tetratex)."""
-        return self._tpb("tpb_on_tetratex")
+        if hasattr(self, "_tpb_on_tetratex"):
+            return self._tpb_on_tetratex
 
-    @cached_property
+        self._tpb_on_tetratex = self._tpb("tpb_on_tetratex")
+
+        return self._tpb_on_tetratex
+
+    @property
     def tpb_on_nylon(self) -> g4.Material:
         """Tetraphenyl-butadiene wavelength shifter (in nylon matrix)."""
+        if hasattr(self, "_tpb_on_nylon"):
+            return self._tpb_on_nylon
+
         # as a base, use the normal TPB properties.
-        _tpb_on_nylon = self._tpb(
+        self._tpb_on_nylon = self._tpb(
             "tpb_on_nylon",
             # For 30% TPB 70% PS the WLS light yield is reduced by 30% [Alexey]
             quantum_efficiency=0.7 * legendoptics.tpb.tpb_quantum_efficiency(),
@@ -287,164 +279,184 @@ class OpticalMaterialRegistry:
         )
 
         # add absorption length from nylon.
-        legendoptics.nylon.pyg4_nylon_attach_absorption(_tpb_on_nylon, self.g4_registry)
+        legendoptics.nylon.pyg4_nylon_attach_absorption(self._tpb_on_nylon, self.g4_registry)
 
-        return _tpb_on_nylon
+        return self._tpb_on_nylon
 
-    @cached_property
+    @property
     def tetratex(self) -> g4.Material:
         """Tetratex diffuse reflector.
 
         .. warning:: For full optics support, a reflective surface is needed, see
             :py:func:`surfaces.OpticalSurfaceRegistry.wlsr_tpb_to_tetratex`.
         """
-        _tetratex = g4.Material(
+        if hasattr(self, "_tetratex"):
+            return self._tetratex
+
+        self._tetratex = g4.Material(
             name="tetratex",
             density=0.35,
             number_of_components=2,
             registry=self.g4_registry,
         )
-        _tetratex.add_element_massfraction(self.get_element("F"), massfraction=0.76)
-        _tetratex.add_element_massfraction(self.get_element("C"), massfraction=0.24)
+        self._tetratex.add_element_massfraction(self.get_element("F"), massfraction=0.76)
+        self._tetratex.add_element_massfraction(self.get_element("C"), massfraction=0.24)
 
-        return _tetratex
+        return self._tetratex
 
-    @cached_property
+    @property
     def nylon(self) -> g4.Material:
         """Nylon (from Borexino)."""
-        _nylon = g4.Material(
+        if hasattr(self, "_nylon"):
+            return self._nylon
+
+        self._nylon = g4.Material(
             name="nylon",
             density=1.15,
             number_of_components=4,
             registry=self.g4_registry,
         )
-        _nylon.add_element_natoms(self.get_element("H"), natoms=2)
-        _nylon.add_element_natoms(self.get_element("N"), natoms=2)
-        _nylon.add_element_natoms(self.get_element("O"), natoms=3)
-        _nylon.add_element_natoms(self.get_element("C"), natoms=13)
+        self._nylon.add_element_natoms(self.get_element("H"), natoms=2)
+        self._nylon.add_element_natoms(self.get_element("N"), natoms=2)
+        self._nylon.add_element_natoms(self.get_element("O"), natoms=3)
+        self._nylon.add_element_natoms(self.get_element("C"), natoms=13)
 
-        legendoptics.nylon.pyg4_nylon_attach_rindex(_nylon, self.g4_registry)
-        legendoptics.nylon.pyg4_nylon_attach_absorption(_nylon, self.g4_registry)
+        legendoptics.nylon.pyg4_nylon_attach_rindex(self._nylon, self.g4_registry)
+        legendoptics.nylon.pyg4_nylon_attach_absorption(self._nylon, self.g4_registry)
 
-        return _nylon
+        return self._nylon
 
-    @cached_property
+    @property
     def pen(self) -> g4.Material:
         """PEN wavelength-shifter and scintillator."""
-        _pen = g4.Material(
+        if hasattr(self, "_pen"):
+            return self._pen
+
+        self._pen = g4.Material(
             name="pen",
             density=1.3,
             number_of_components=3,
             registry=self.g4_registry,
         )
-        _pen.add_element_natoms(self.get_element("C"), natoms=14)
-        _pen.add_element_natoms(self.get_element("H"), natoms=10)
-        _pen.add_element_natoms(self.get_element("O"), natoms=4)
+        self._pen.add_element_natoms(self.get_element("C"), natoms=14)
+        self._pen.add_element_natoms(self.get_element("H"), natoms=10)
+        self._pen.add_element_natoms(self.get_element("O"), natoms=4)
 
-        legendoptics.pen.pyg4_pen_attach_rindex(_pen, self.g4_registry)
-        legendoptics.pen.pyg4_pen_attach_attenuation(_pen, self.g4_registry)
-        legendoptics.pen.pyg4_pen_attach_wls(_pen, self.g4_registry)
-        legendoptics.pen.pyg4_pen_attach_scintillation(_pen, self.g4_registry)
+        legendoptics.pen.pyg4_pen_attach_rindex(self._pen, self.g4_registry)
+        legendoptics.pen.pyg4_pen_attach_attenuation(self._pen, self.g4_registry)
+        legendoptics.pen.pyg4_pen_attach_wls(self._pen, self.g4_registry)
+        legendoptics.pen.pyg4_pen_attach_scintillation(self._pen, self.g4_registry)
 
-        return _pen
-
-    @cached_property
+        return self._pen
+    
+    @property
     def water(self) -> g4.Material:
-        """High purity water of the watertank."""
-        _water = g4.MaterialCompound(
-            name="Water",  # written "Water" to use Geant4 intern way of handling Rayleigh scattering with water,
-            # see Geant4 BookForApplicationDevelopers pg. 270
-            density=1.0,
+        """Create water material."""
+        if hasattr(self, "_water"):
+            return self._water
+        
+        self._water = g4.Material(
+            name="water",
+            density=1.000,  # g/cm³
+            number_of_components=2,
+            registry=self.g4_registry
+        )
+        self._water.add_element_massfraction(self.get_element("H"), massfraction=0.111)
+        self._water.add_element_massfraction(self.get_element("O"), massfraction=0.889)
+
+        return self._water
+    
+    @property
+    def gadolinium_solution(self) -> g4.Material:
+        """gadolinium solution for the center string"""
+        if hasattr(self, "_gadolinium_solution"):
+            return self._gadolinium_solution
+
+        self._gadolinium_solution = g4.Material(
+            name="gadolinium_solution",
+            density=1,
+            number_of_components=2,
+            registry=self.g4_registry,
+        )
+        self._gadolinium_solution.add_element_massfraction(self.get_element("Gd"), massfraction=0.002)
+        self._gadolinium_solution.add_material(g4.MaterialPredefined("G4_WATER"), fractionmass=0.998)
+
+        return self._gadolinium_solution
+    
+    @property
+    def gadolinium_loaded_PE(self) -> g4.Material:
+        """gadolinium solution for the center string"""
+        if hasattr(self, "_gadolinium_loaded_PE"):
+            return self._gadolinium_loaded_PE
+        
+        self._gadolinium_loaded_PE = g4.Material(
+            name="gadolinium_loaded_PE",
+            density=0.94,  # typical density of polyethylene
             number_of_components=2,
             registry=self.g4_registry,
         )
 
-        _water.add_element_natoms(self.get_element("H"), natoms=2)
-        _water.add_element_natoms(self.get_element("O"), natoms=1)
-
-        legendoptics.water.pyg4_water_attach_rindex(_water, self.g4_registry)
-        legendoptics.water.pyg4_water_attach_absorption(_water, self.g4_registry)
-
-        return _water
-
-    @cached_property
-    def vm2000(self) -> g4.Material:
-        """Material for the reflective foil VM2000 based on nylon (e.g. MaGe)."""
-        _vm2000 = g4.MaterialCompound(
-            name="vm2000",
-            density=1.15,
-            number_of_components=4,
-            registry=self.g4_registry,
-        )
-
-        # Add elements with their mass fractions
-        _vm2000.add_element_natoms(self.get_element("H"), natoms=2)
-        _vm2000.add_element_natoms(self.get_element("N"), natoms=2)
-        _vm2000.add_element_natoms(self.get_element("O"), natoms=3)
-        _vm2000.add_element_natoms(self.get_element("C"), natoms=13)
-
-        legendoptics.vm2000.pyg4_vm2000_attach_absorption_length(_vm2000, self.g4_registry)
-        legendoptics.vm2000.pyg4_vm2000_attach_rindex(_vm2000, self.g4_registry)
-        legendoptics.vm2000.pyg4_vm2000_attach_wls(_vm2000, self.g4_registry)
-        # VM2000 seem to consist of PMMA and PEN layers https://iopscience.iop.org/article/10.1088/1748-0221/12/06/P06017/pdf
-        legendoptics.pen.pyg4_pen_attach_scintillation(_vm2000, self.g4_registry)
-        legendoptics.vm2000.pyg4_vm2000_attach_particle_scintillationyields(_vm2000, self.g4_registry)
-
-        return _vm2000
-
-    @cached_property
-    def acryl(self) -> g4.Material:
-        """Material for the acryl cap of the PMT encapsulation."""
-        _acryl = g4.MaterialCompound(
-            name="acryl",
-            density=1.18,
+        polyethylene = g4.Material(
+            name="polyethylene",
+            density=0.94,  # typical density of polyethylene
             number_of_components=2,
             registry=self.g4_registry,
         )
+        polyethylene.add_element_natoms(self.get_element("C"), natoms=2)
+        polyethylene.add_element_natoms(self.get_element("H"), natoms=4)
 
-        _acryl.add_element_natoms(self.get_element("H"), natoms=2)
-        _acryl.add_element_natoms(self.get_element("C"), natoms=1)
 
-        legendoptics.pmts.pyg4_pmt_attach_acryl_rindex(_acryl, self.g4_registry)
-        legendoptics.pmts.pyg4_pmt_attach_acryl_absorption_length(_acryl, self.g4_registry)
-
-        return _acryl
-
-    @cached_property
-    def pmt_air(self) -> g4.Material:
-        """Material for the air in between Acryl cap and PMT."""
-        _pmt_air = g4.MaterialCompound(
-            name="PMT_air",
-            density=0.001225,
+        gadolinium_oxide = g4.Material(
+            name="Gadolinium(III) Oxide",
+            density=7.41,  # Density of Gd₂O₃ in g/cm³
             number_of_components=2,
             registry=self.g4_registry,
-        )
+        )    
+        # Gd₂O₃ has 2 Gd atoms and 3 O atoms
+        gadolinium_oxide.add_element_natoms(self.get_element("Gd"), natoms=2)
+        gadolinium_oxide.add_element_natoms(self.get_element("O"), natoms=3)
 
-        _pmt_air.add_element_natoms(self.get_element("N"), natoms=3)
-        _pmt_air.add_element_natoms(self.get_element("O"), natoms=1)
+        self._gadolinium_loaded_PE.add_material(gadolinium_oxide, fractionmass=0.002)
+        self._gadolinium_loaded_PE.add_material(polyethylene, fractionmass=0.998)
 
-        legendoptics.pmts.pyg4_pmt_attach_air_rindex(_pmt_air, self.g4_registry)
-        legendoptics.pmts.pyg4_pmt_attach_air_absorption_length(_pmt_air, self.g4_registry)
+        return self._gadolinium_loaded_PE
 
-        return _pmt_air
+    @property
+    def gd2o3_powder(self) -> g4.Material:
+        """Define Gd2O3 Powder with density 7.407 g/cm³."""
+        if hasattr(self, "_gd2o3_powder"):
+            return self._gd2o3_powder
 
-    @cached_property
-    def borosilicate(self) -> g4.Material:
-        """Material for the borosilicate glass of the PMT."""
-        _borosilicate = g4.MaterialCompound(
-            name="borosilicate",
-            density=2.23,
-            number_of_components=4,
+        # Material für Gd₂O₃ erstellen
+        self._gd2o3_powder = g4.Material(
+            name="Gadolinium(III) Oxide (Powder)",
+            density=7.407,  # Dichte in g/cm³ bei 20 °C
+            number_of_components=2,  # Gd und O
             registry=self.g4_registry,
         )
 
-        _borosilicate.add_element_massfraction(self.get_element("Si"), 0.376)
-        _borosilicate.add_element_massfraction(self.get_element("O"), 0.543)
-        _borosilicate.add_element_massfraction(self.get_element("B"), 0.04)
-        _borosilicate.add_element_massfraction(self.get_element("Na"), 0.029)
-        _borosilicate.add_element_massfraction(self.get_element("Al"), 0.012)
+        # Elemente hinzufügen
+        self._gd2o3_powder.add_element_natoms(self.get_element("Gd"), natoms=2)  # 2 Gd-Atome
+        self._gd2o3_powder.add_element_natoms(self.get_element("O"), natoms=3)   # 3 O-Atome
 
-        legendoptics.pmts.pyg4_pmt_attach_borosilicate_rindex(_borosilicate, self.g4_registry)
-        legendoptics.pmts.pyg4_pmt_attach_borosilicate_absorption_length(_borosilicate, self.g4_registry)
+        return self._gd2o3_powder
 
-        return _borosilicate
+    @property
+    def polyethylene(self) -> g4.Material:
+        """Define pure polyethylene."""
+        if hasattr(self, "_polyethylene"):
+            return self._polyethylene
+
+        # Polyethylen-Material erstellen
+        self._polyethylene = g4.Material(
+            name="polyethylene",
+            density=0.94,  # typische Dichte von Polyethylen in g/cm³
+            number_of_components=2,  # C und H
+            registry=self.g4_registry,
+        )
+
+        # Elemente hinzufügen
+        self._polyethylene.add_element_natoms(self.get_element("C"), natoms=2)  # C2
+        self._polyethylene.add_element_natoms(self.get_element("H"), natoms=4)  # H4
+
+        return self._polyethylene
